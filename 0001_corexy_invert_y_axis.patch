@@ -1,0 +1,34 @@
+--- Marlin-1.1.5/Marlin/planner.cpp	2017-08-29 01:46:39.000000000 +0200
++++ Marlin-1.1.5.patched/Marlin/planner.cpp	2017-09-01 03:22:03.454742340 +0200
+@@ -787,8 +787,13 @@
+     if (da < 0) SBI(dm, X_HEAD);                // Save the real Extruder (head) direction in X Axis
+     if (db < 0) SBI(dm, Y_HEAD);                // ...and Y
+     if (dc < 0) SBI(dm, Z_AXIS);
+-    if (da + db < 0) SBI(dm, A_AXIS);           // Motor A direction
+-    if (CORESIGN(da - db) < 0) SBI(dm, B_AXIS); // Motor B direction
++    #if ENABLED(COREXY_INVERTED_Y)
++      if (da + db < 0) SBI(dm, B_AXIS);           // Motor A direction
++      if (CORESIGN(da - db) < 0) SBI(dm, A_AXIS); // Motor B direction
++    #else
++      if (da + db < 0) SBI(dm, A_AXIS);           // Motor A direction
++      if (CORESIGN(da - db) < 0) SBI(dm, B_AXIS); // Motor B direction
++    #endif
+   #elif CORE_IS_XZ
+     if (da < 0) SBI(dm, X_HEAD);                // Save the real Extruder (head) direction in X Axis
+     if (db < 0) SBI(dm, Y_AXIS);
+@@ -830,8 +835,13 @@
+   // Number of steps for each axis
+   // See http://www.corexy.com/theory.html
+   #if CORE_IS_XY
+-    block->steps[A_AXIS] = labs(da + db);
+-    block->steps[B_AXIS] = labs(da - db);
++    #if ENABLED(COREXY_INVERTED_Y)
++      block->steps[B_AXIS] = labs(da + db);
++      block->steps[A_AXIS] = labs(da - db);
++    #else
++      block->steps[A_AXIS] = labs(da + db);
++      block->steps[B_AXIS] = labs(da - db);
++    #endif
+     block->steps[Z_AXIS] = labs(dc);
+   #elif CORE_IS_XZ
+     block->steps[A_AXIS] = labs(da + dc);

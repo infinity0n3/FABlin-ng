@@ -1,0 +1,212 @@
+--- Marlin-1.1.5/Marlin/Marlin_main.cpp	2017-08-29 01:46:39.000000000 +0200
++++ Marlin-1.1.5.patched/Marlin/Marlin_main.cpp	2017-09-01 23:01:14.511224150 +0200
+@@ -320,6 +320,10 @@
+   #include "endstop_interrupts.h"
+ #endif
+ 
++#if ENABLED(TOTUMDUINO)
++  #include "fabtotum/FABtotum.h"
++#endif
++
+ #if ENABLED(M100_FREE_MEMORY_WATCHER)
+   void gcode_M100();
+   void M100_dump_routine(const char * const title, const char *start, const char *end);
+@@ -814,6 +818,10 @@
+   extern void digipot_i2c_init();
+ #endif
+ 
++#ifdef TOTUMDUINO
++#include "fabtotum/m_gcodes.hpp"
++#endif
++
+ /**
+  * Inject the next "immediate" command, when possible, onto the front of the queue.
+  * Return true if any immediate commands remain to inject.
+@@ -1007,6 +1015,8 @@
+ 
+   #endif // NEOPIXEL_RGBW_LED
+ 
++  #if DISABLED(TOTUMDUINO)
++
+   void set_led_color(
+     const uint8_t r, const uint8_t g, const uint8_t b
+       #if ENABLED(RGBW_LED) || ENABLED(NEOPIXEL_RGBW_LED)
+@@ -1064,6 +1074,8 @@
+     #endif
+   }
+ 
++  #endif // TOTUMDUINO
++
+ #endif // HAS_COLOR_LEDS
+ 
+ void gcode_line_error(const char* err, bool doFlush = true) {
+@@ -7273,7 +7285,9 @@
+ }
+ 
+ #if HAS_TEMP_HOTEND || HAS_TEMP_BED
+-
++  #if ENABLED(TOTUMDUINO)
++    #include "fabtotum/formats/temperature.hpp"
++  #else
+   void print_heater_state(const float &c, const float &t,
+     #if ENABLED(SHOW_TEMP_ADC_VALUES)
+       const float r,
+@@ -7344,6 +7358,7 @@
+       }
+     #endif
+   }
++  #endif /* TOTUMDUINO */
+ #endif
+ 
+ /**
+@@ -7382,7 +7397,11 @@
+   inline void auto_report_temperatures() {
+     if (auto_report_temp_interval && ELAPSED(millis(), next_temp_report_ms)) {
+       next_temp_report_ms = millis() + 1000UL * auto_report_temp_interval;
+-      print_heaterstates();
++      print_heaterstates(
++      #if ENABLED(TOTUMDUINO)
++      1 /* SHORT_FORMAT */
++      #endif
++      );
+       SERIAL_EOL();
+     }
+   }
+@@ -7527,13 +7546,19 @@
+     now = millis();
+     if (ELAPSED(now, next_temp_ms)) { //Print temp & remaining time every 1s while waiting
+       next_temp_ms = now + 1000UL;
+-      print_heaterstates();
+-      #if TEMP_RESIDENCY_TIME > 0
+-        SERIAL_PROTOCOLPGM(" W:");
+-        if (residency_start_ms)
+-          SERIAL_PROTOCOL(long((((TEMP_RESIDENCY_TIME) * 1000UL) - (now - residency_start_ms)) / 1000UL));
+-        else
+-          SERIAL_PROTOCOLCHAR('?');
++      print_heaterstates(
++      #if ENABLED(TOTUMDUINO)
++      1 /* SHORT_FORMAT */
++      #endif
++      );
++      #if DISABLED(TOTUMDUINO)
++        #if TEMP_RESIDENCY_TIME > 0
++          SERIAL_PROTOCOLPGM(" W:");
++          if (residency_start_ms)
++            SERIAL_PROTOCOL(long((((TEMP_RESIDENCY_TIME) * 1000UL) - (now - residency_start_ms)) / 1000UL));
++          else
++            SERIAL_PROTOCOLCHAR('?');
++        #endif
+       #endif
+       SERIAL_EOL();
+     }
+@@ -7667,13 +7692,19 @@
+       now = millis();
+       if (ELAPSED(now, next_temp_ms)) { //Print Temp Reading every 1 second while heating up.
+         next_temp_ms = now + 1000UL;
+-        print_heaterstates();
+-        #if TEMP_BED_RESIDENCY_TIME > 0
+-          SERIAL_PROTOCOLPGM(" W:");
+-          if (residency_start_ms)
+-            SERIAL_PROTOCOL(long((((TEMP_BED_RESIDENCY_TIME) * 1000UL) - (now - residency_start_ms)) / 1000UL));
+-          else
+-            SERIAL_PROTOCOLCHAR('?');
++        print_heaterstates(
++        #if ENABLED(TOTUMDUINO)
++        1 /* SHORT_FORMAT */
++        #endif
++        );
++        #if DISABLED(TOTUMDUINO)
++          #if TEMP_BED_RESIDENCY_TIME > 0
++            SERIAL_PROTOCOLPGM(" W:");
++            if (residency_start_ms)
++              SERIAL_PROTOCOL(long((((TEMP_BED_RESIDENCY_TIME) * 1000UL) - (now - residency_start_ms)) / 1000UL));
++            else
++              SERIAL_PROTOCOLCHAR('?');
++          #endif
+         #endif
+         SERIAL_EOL();
+       }
+@@ -8349,6 +8380,7 @@
+    *   M150 W          ; Turn LED white using a white LED
+    *
+    */
++  #if DISABLED(TOTUMDUINO)
+   inline void gcode_M150() {
+     set_led_color(
+       parser.seen('R') ? (parser.has_value() ? parser.value_byte() : 255) : 0,
+@@ -8359,6 +8391,7 @@
+       #endif
+     );
+   }
++  #endif
+ 
+ #endif // HAS_COLOR_LEDS
+ 
+@@ -8431,6 +8464,7 @@
+     }
+ }
+ 
++#if DISABLED(TOTUMDUINO)
+ /**
+  * M204: Set Accelerations in units/sec^2 (M204 P1200 R3000 T3000)
+  *
+@@ -8458,6 +8492,7 @@
+     SERIAL_ECHOLNPAIR("Setting Travel Acceleration: ", planner.travel_acceleration);
+   }
+ }
++#endif /* TOTUMDUINO */
+ 
+ /**
+  * M205: Set Advanced Settings
+@@ -11612,6 +11647,10 @@
+       case 999: // M999: Restart after being Stopped
+         gcode_M999();
+         break;
++
++      #if ENABLED(TOTUMDUINO)
++      #include "fabtotum/switch_m_gcodes.h"
++      #endif
+     }
+     break;
+ 
+@@ -12794,18 +12833,24 @@
+       #endif
+       HOTEND_LOOP()
+         max_temp = MAX3(max_temp, thermalManager.degHotend(e), thermalManager.degTargetHotend(e));
+-      const bool new_led = (max_temp > 55.0) ? true : (max_temp < 54.0) ? false : red_led;
+-      if (new_led != red_led) {
+-        red_led = new_led;
+-        #if PIN_EXISTS(STAT_LED_RED)
+-          WRITE(STAT_LED_RED_PIN, new_led ? HIGH : LOW);
+-          #if PIN_EXISTS(STAT_LED_BLUE)
+-            WRITE(STAT_LED_BLUE_PIN, new_led ? LOW : HIGH);
++      #if ENABLED(TOTUMDUINO)
++        const bool new_led = (max_temp > 55.0);
++        WRITE(STAT_LED_RED_PIN, new_led ? HIGH : LOW);
++
++      #else
++        const bool new_led = (max_temp > 55.0) ? true : (max_temp < 54.0) ? false : red_led;
++        if (new_led != red_led) {
++          red_led = new_led;
++          #if PIN_EXISTS(STAT_LED_RED)
++            WRITE(STAT_LED_RED_PIN, new_led ? HIGH : LOW);
++            #if PIN_EXISTS(STAT_LED_BLUE)
++              WRITE(STAT_LED_BLUE_PIN, new_led ? LOW : HIGH);
++            #endif
++          #else
++            WRITE(STAT_LED_BLUE_PIN, new_led ? HIGH : LOW);
+           #endif
+-        #else
+-          WRITE(STAT_LED_BLUE_PIN, new_led ? HIGH : LOW);
+-        #endif
+-      }
++        }
++      #endif
+     }
+   }
+ 
+@@ -13609,4 +13654,3 @@
+   endstops.report_state();
+   idle();
+ }
+-

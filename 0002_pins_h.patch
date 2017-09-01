@@ -1,0 +1,12 @@
+--- Marlin-1.1.5/Marlin/pins.h	2017-08-29 01:46:39.000000000 +0200
++++ Marlin-1.1.5.patched/Marlin/pins.h	2017-09-01 16:56:15.704284772 +0200
+@@ -154,7 +154,8 @@
+   #include "pins_GT2560_REV_A.h"      // ATmega1280, ATmega2560
+ #elif MB(GT2560_REV_A_PLUS)
+   #include "pins_GT2560_REV_A_PLUS.h" // ATmega1280, ATmega2560
+-
++#elif MB(TOTUMDUINO_V1)
++  #include "pins_TOTUMDUINO_V1.h"     // ATmega1280
+ //
+ // ATmega1281, ATmega2561
+ //

@@ -1,0 +1,26 @@
+--- Marlin-1.1.5/Marlin/buzzer.h	2017-08-29 01:46:39.000000000 +0200
++++ Marlin-1.1.5.patched/Marlin/buzzer.h	2017-09-01 03:31:26.726312130 +0200
+@@ -83,7 +83,11 @@
+      * @details Brings the class state to a known one.
+      */
+     void reset() {
++      #if ENABLED(BEEPER_PIN_INV)
++      this->on();
++      #else
+       this->off();
++      #endif
+       this->state.endtime = 0;
+     }
+ 
+@@ -133,7 +137,11 @@
+             ::tone(BEEPER_PIN, this->state.tone.frequency, this->state.tone.duration);
+             CRITICAL_SECTION_END;
+           #else
++            #if ENABLED(BEEPER_PIN_INV)
++            this->off();
++            #else
+             this->on();
++            #endif
+           #endif
+         }
+       }

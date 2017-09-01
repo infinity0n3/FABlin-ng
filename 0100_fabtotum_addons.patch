@@ -1,0 +1,1169 @@
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/Bed.cpp Marlin-1.1.5.patched/Marlin/fabtotum/Bed.cpp
+--- Marlin-1.1.5/Marlin/fabtotum/Bed.cpp	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/Bed.cpp	2017-09-01 00:15:09.635096497 +0200
+@@ -0,0 +1,14 @@
++#include <fabtotum/Bed.h>
++#include <temperature.h>
++
++namespace FABtotum {
++
++Bed bed;
++
++bool Bed::isInPlace()
++{
++  return thermalManager.degBed() > 0;
++}
++
++
++}
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/Bed.h Marlin-1.1.5.patched/Marlin/fabtotum/Bed.h
+--- Marlin-1.1.5/Marlin/fabtotum/Bed.h	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/Bed.h	2017-08-31 23:59:02.717114168 +0200
+@@ -0,0 +1,13 @@
++#ifndef FABTOTUM_BED_H
++#define FABTOTUM_BED_H
++
++namespace FABtotum {
++
++class Bed {
++  public:
++    bool isInPlace();
++};
++
++}
++
++#endif /* FABTOTUM_BED_H */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/Core.cpp Marlin-1.1.5.patched/Marlin/fabtotum/Core.cpp
+--- Marlin-1.1.5/Marlin/fabtotum/Core.cpp	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/Core.cpp	2017-09-01 17:31:51.470184036 +0200
+@@ -0,0 +1,316 @@
++#include <fabtotum/Core.h>
++#include <MarlinConfig.h>
++#include <fabtotum/macros.h>
++
++namespace FABtotum {
++  Core core;
++
++  /* static variables */
++  int Core::servo_extended_angle;
++  int Core::servo_retracted_angle;
++
++  unsigned long Core::fab_serial_code;
++  unsigned long Core::fab_control_serial_code;
++  unsigned int  Core::fab_board_version;
++  unsigned int  Core::fab_batch_number;
++  unsigned long Core::fab_control_batch_number;
++
++  unsigned int  Core::led_board_version;
++  unsigned int  Core::flex_board_version;
++  unsigned int  Core::plateconn_board_version;
++  unsigned int  Core::hotplate_board_version;
++  unsigned int  Core::general_assembly_version;
++
++  Core::Core()
++  {
++    fading_speed      = 100;
++    led_update_cycles = 0;
++    red_fading        = false;
++    green_fading      = false;
++    blue_fading       = false;
++    slope             = true;
++    fading_started    = false;
++
++    FabSoftPwm_LMT    = MAX_PWM;
++    FabSoftPwm_TMR    = 0;
++    HeadLightSoftPwm  = 0;
++    LaserSoftPwm      = 0;
++    RedSoftPwm        = 0;
++    GreenSoftPwm      = 0;
++    BlueSoftPwm       = 0;
++
++    error_code        = 0;
++  }
++
++  void Core::init()
++  {
++    SET_OUTPUT(RED_PIN);
++    SET_OUTPUT(GREEN_PIN);
++    SET_OUTPUT(BLUE_PIN);
++    pinMode(HOT_LED_PIN,OUTPUT);
++    pinMode(DOOR_OPEN_PIN,INPUT);
++    pinMode(HEAD_LIGHT_PIN,OUTPUT);
++    pinMode(LASER_GATE_PIN,OUTPUT);
++    pinMode(MILL_MOTOR_ON_PIN,OUTPUT);
++    pinMode(NOT_SERVO1_ON_PIN,OUTPUT);
++    pinMode(NOT_SERVO2_ON_PIN,OUTPUT);
++
++    //setting analog as input
++    //~ SET_ANALOG(MAIN_CURRENT_SENSE_PIN);
++    //~ SET_ANALOG(MON_5V_PIN);
++    //~ SET_ANALOG(MON_24V_PIN);
++    //~ SET_ANALOG(PRESSURE_ANALOG_PIN);
++
++    //POWER MABNAHGEMENT
++    pinMode(PWR_OUT_PIN, OUTPUT);  //set external PSU shutdown pin (Optional on I2C)
++    pinMode(PWR_IN_PIN,INPUT);  //set external PSU shutdown pin (Optional on I2C)
++    digitalWrite(PWR_OUT_PIN, HIGH);
++
++    //fastio init
++    // SET_INPUT(IO)  ; SET_OUTPUT(IO);
++    SET_INPUT(WIRE_END_PIN);
++    SET_OUTPUT(NOT_RASPI_PWR_ON_PIN);
++    SET_INPUT(NOT_SECURE_SW_PIN);
++    SET_OUTPUT(NOT_REEL_LENS_OPEN_PIN);
++    SET_OUTPUT(LIGHT_SIGN_ON_PIN);
++    SET_OUTPUT(RPI_RECOVERY_PIN);
++
++    //set output
++    RED_OFF();
++    GREEN_OFF();
++    BLUE_OFF();
++    RPI_ERROR_ACK_OFF();
++
++    HOT_LED_OFF();
++
++    HEAD_LIGHT_OFF();
++    LASER_GATE_OFF();
++
++    MILL_MOTOR_OFF();
++    SERVO1_OFF();
++    #if (NUM_SERVOS > 1)
++      SERVO2_OFF();
++    #endif
++
++    RASPI_PWR_ON();
++
++    LIGHT_SIGN_ON();
++
++    FabSoftPwm_LMT    = MAX_PWM;
++    FabSoftPwm_TMR    = 0;
++    HeadLightSoftPwm  = 0;
++    LaserSoftPwm      = 0;
++    RedSoftPwm        = 0;
++    GreenSoftPwm      = 0;
++    BlueSoftPwm       = 0;
++  }
++
++  void Core::manage_inactivity()
++  {
++    manage_soft_pwm();
++    manage_amb_color_fading();
++  }
++
++  void Core::manage_soft_pwm() {
++
++    if (FabSoftPwm_TMR == 0)
++    {
++  #ifdef ENABLE_LASER_MODE
++      if (Laser::power > 0) WRITE(SERVO0_PIN,1);
++      if (LaserSoftPwm>0) {
++        LASER_GATE_ON();
++      }
++  #endif
++
++      if (HeadLightSoftPwm>0) {
++        HEAD_LIGHT_ON();
++      }
++      if (RedSoftPwm>0) {
++        RED_ON();
++      }
++      if (GreenSoftPwm>0) {
++        GREEN_ON();
++      }
++      if (BlueSoftPwm>0) {
++        BLUE_ON();
++      }
++    }
++    else
++    {
++  #ifdef ENABLE_LASER_MODE
++      if (FabSoftPwm_TMR > Laser::power) WRITE(SERVO0_PIN,0);
++      if ( FabSoftPwm_TMR>LaserSoftPwm && LaserSoftPwm<MAX_PWM ) {
++        LASER_GATE_OFF();
++      }
++  #endif
++
++
++      if ( FabSoftPwm_TMR>HeadLightSoftPwm && HeadLightSoftPwm<MAX_PWM ) {
++        HEAD_LIGHT_OFF();
++      }
++      if ( FabSoftPwm_TMR>RedSoftPwm && RedSoftPwm<MAX_PWM) {
++        RED_OFF();
++      }
++      if ( FabSoftPwm_TMR>GreenSoftPwm && GreenSoftPwm<MAX_PWM ) {
++        GREEN_OFF();
++      }
++      if ( FabSoftPwm_TMR>BlueSoftPwm && BlueSoftPwm<MAX_PWM ) {
++        BLUE_OFF();
++      }
++    }
++
++    if (++FabSoftPwm_TMR > FabSoftPwm_LMT)
++      FabSoftPwm_TMR = 0;
++  }
++
++  void Core::manage_amb_color_fading()
++  {
++    if(red_fading || green_fading || blue_fading) {
++      fading_started=true;
++      if(led_update_cycles>fading_speed) {
++
++        if(slope)
++        {
++          if(red_fading) {RedSoftPwm=RedSoftPwm+1;}
++          if(green_fading){GreenSoftPwm=GreenSoftPwm+1;}
++          if(blue_fading){BlueSoftPwm=BlueSoftPwm+1;}
++        }
++        else
++        {
++          if(red_fading){RedSoftPwm=RedSoftPwm-1;}
++          if(green_fading){GreenSoftPwm=GreenSoftPwm-1;}
++          if(blue_fading){BlueSoftPwm=BlueSoftPwm-1;}
++        }
++
++        if(( (RedSoftPwm==MAX_PWM || RedSoftPwm==0) && red_fading)
++          || ((GreenSoftPwm==MAX_PWM || GreenSoftPwm==0) && green_fading)
++          || ((BlueSoftPwm==MAX_PWM || BlueSoftPwm==0) && blue_fading)
++          )
++        {
++            slope=!slope;
++        }
++
++        led_update_cycles=0;
++      }
++      led_update_cycles=led_update_cycles+1;
++    }
++
++    if(!red_fading && !green_fading && !blue_fading && fading_started) {
++      led_update_cycles=0;
++      fading_started=false;
++      slope=true;
++    }
++  }
++
++  void Core::setAmbientColor(unsigned int red, unsigned int green, unsigned int blue) {
++
++    RedSoftPwm    = red;
++    GreenSoftPwm  = green;
++    BlueSoftPwm   = blue;
++  }
++
++  void Core::setAmbientColorFading(bool red_bool, bool green_bool, bool blue_bool, unsigned int fading_speed_in) {
++
++    setAmbientColor(0,0,0);
++
++    led_update_cycles = 0;
++    fading_started    = false;
++    slope             = true;
++
++    red_fading    = red_bool;
++    green_fading  = green_bool;
++    blue_fading   = blue_bool;
++
++    fading_speed  = fading_speed_in;
++  }
++
++  void Core::store_ambient_color() {
++
++  }
++
++  void Core::restore_ambient_color() {
++
++  }
++
++  bool Core::isAmbientFading()
++  {
++    return (red_fading || green_fading || blue_fading);
++  }
++
++  void Core::setAmbientRed(unsigned int value) {
++    if(value >= 255) {
++      RedSoftPwm  = MAX_PWM;
++    } else {
++      RedSoftPwm  = (unsigned int)(value/2);
++    }
++  }
++
++  void Core::setAmbientGreen(unsigned int value) {
++    if(value >= 255) {
++      GreenSoftPwm  = MAX_PWM;
++    } else {
++      GreenSoftPwm  = (unsigned int)(value/2);
++    }
++  }
++
++  void Core::setAmbientBlue(unsigned int value) {
++    if(value >= 255) {
++      BlueSoftPwm  = MAX_PWM;
++    } else {
++      BlueSoftPwm  = (unsigned int)(value/2);
++    }
++  }
++
++  void Core::stopFading()
++  {
++
++  }
++
++  void Core::setRPiPower(bool state)
++  {
++    if(state)
++      RASPI_PWR_ON();
++    else
++      RASPI_PWR_OFF();
++  }
++
++  bool Core::isWireEndTriggered()
++  {
++    #if defined(WIRE_END_INVERTING)
++      return WIRE_END_STATUS() ^ WIRE_END_INVERTING;
++    #else
++      return WIRE_END_STATUS();
++    #endif
++  }
++
++  bool Core::isDoorOpen()
++  {
++    return DOOR_OPEN_STATUS();
++  }
++
++  bool Core::isReelLensOpen()
++  {
++    return REEL_LENS_OPEN_STATUS();
++  }
++
++  bool Core::isSecureSwitchTriggered()
++  {
++    return SECURE_SW_STATUS();
++  }
++
++  void Core::setErrorCode(unsigned int error)
++  {
++    error_code = error;
++  }
++
++  unsigned int Core::getErrorCode()
++  {
++    return error_code;
++  }
++
++  bool Core::triggerEvent(unsigned int error, unsigned int arg1 = 0)
++  {
++    return true;
++  }
++
++} /* namespace FABtotum */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/Core.h Marlin-1.1.5.patched/Marlin/fabtotum/Core.h
+--- Marlin-1.1.5/Marlin/fabtotum/Core.h	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/Core.h	2017-09-01 17:31:48.386161608 +0200
+@@ -0,0 +1,89 @@
++#ifndef FABTOTUM_CORE_H
++#define FABTOTUM_CORE_H
++
++namespace FABtotum {
++
++  class Core {
++    public:
++
++      // variables
++
++      static int servo_extended_angle;
++      static int servo_retracted_angle;
++
++      static unsigned long fab_serial_code;
++      static unsigned long fab_control_serial_code;
++      static unsigned int  fab_board_version;
++      static unsigned int  fab_batch_number;
++      static unsigned long fab_control_batch_number;
++
++      static unsigned int  led_board_version;
++      static unsigned int  flex_board_version;
++      static unsigned int  plateconn_board_version;
++      static unsigned int  hotplate_board_version;
++      static unsigned int  general_assembly_version;
++
++      // functions
++      Core();
++      void init();
++
++      void manage_inactivity();
++
++      void setAmbientColor(unsigned int red, unsigned int green, unsigned int blue);
++
++      void setAmbientColorFading(bool red_bool, bool green_bool, bool blue_bool, unsigned int fading_speed_in);
++
++      void store_ambient_color();
++      void restore_ambient_color();
++
++      void setAmbientRed(unsigned int);
++      void setAmbientGreen(unsigned int);
++      void setAmbientBlue(unsigned int);
++
++      bool isAmbientFading();
++      void stopFading();
++
++      void setRPiPower(bool state);
++
++      bool isWireEndTriggered();
++      bool isDoorOpen();
++      bool isReelLensOpen();
++      bool isSecureSwitchTriggered();
++
++      void setErrorCode(unsigned int error);
++      unsigned int getErrorCode();
++
++      bool triggerEvent(unsigned int error, unsigned int arg1);
++    private:
++      // soft pwm
++      unsigned int LaserSoftPwm;
++      unsigned int HeadLightSoftPwm;
++      unsigned int FabSoftPwm_TMR;
++      unsigned int FabSoftPwm_LMT;
++      unsigned int RedSoftPwm;
++      unsigned int GreenSoftPwm;
++      unsigned int BlueSoftPwm;
++      unsigned int RedSoftPwm_old;
++      unsigned int GreenSoftPwm_old;
++      unsigned int BlueSoftPwm_old;
++
++      // fading
++      unsigned int fading_speed;
++      unsigned int led_update_cycles;
++      bool red_fading;
++      bool green_fading;
++      bool blue_fading;
++      bool slope;
++      bool fading_started;
++
++      unsigned int error_code;
++
++      void manage_soft_pwm();
++      void manage_amb_color_fading();
++
++
++  };
++
++}
++
++#endif /* FABTOTUM_CORE_H */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/enums.h Marlin-1.1.5.patched/Marlin/fabtotum/enums.h
+--- Marlin-1.1.5/Marlin/fabtotum/enums.h	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/enums.h	2017-08-31 23:00:01.219134715 +0200
+@@ -0,0 +1,8 @@
++#ifndef FABTOTUM_ENUMS_H
++#define FABTOTUM_ENUMS_H
++
++namespace FABtotum {
++
++}
++
++#endif /* FABTOTUM_ENUMS_H */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/errors.h Marlin-1.1.5.patched/Marlin/fabtotum/errors.h
+--- Marlin-1.1.5/Marlin/fabtotum/errors.h	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/errors.h	2017-09-01 00:59:24.011252104 +0200
+@@ -0,0 +1,31 @@
++#ifndef FABTOTUM_ERRORS_H
++#define FABTOTUM_ERRORS_H
++
++//error codes
++#define ERROR_KILLED      100
++#define ERROR_STOPPED     101
++#define ERROR_DOOR_OPEN   102
++#define ERROR_MIN_TEMP    103
++#define ERROR_MAX_TEMP    104
++#define ERROR_MAX_BED_TEMP  105
++#define ERROR_X_MAX_ENDSTOP  106
++#define ERROR_X_MIN_ENDSTOP  107
++#define ERROR_Y_MAX_ENDSTOP  108
++#define ERROR_Y_MIN_ENDSTOP  109
++#define ERROR_IDLE_SAFETY    110
++#define ERROR_WIRE_END       111
++
++//error codes for FABUI configurable functionalities
++#define ERROR_Y_BOTH_TRIGGERED   120
++#define ERROR_Z_BOTH_TRIGGERED   121
++
++//temperature related messages
++#define ERROR_AMBIENT_TEMP   122
++#define ERROR_EXTRUDE_MINTEMP   123
++#define ERROR_LONG_EXTRUSION   124
++#define ERROR_HEAD_ABSENT    125
++
++//POWER SHUTDOWN REQUEST:
++#define ERROR_PWR_OFF    999
++
++#endif /* FABTOTUM_ERRORS_H */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/FABtotum.h Marlin-1.1.5.patched/Marlin/fabtotum/FABtotum.h
+--- Marlin-1.1.5/Marlin/fabtotum/FABtotum.h	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/FABtotum.h	2017-09-01 01:06:49.021877026 +0200
+@@ -0,0 +1,18 @@
++#ifndef FABTOTUM_H
++#define FABTOTUM_H
++
++#include <fabtotum/Core.h>
++#include <fabtotum/Head.h>
++#include <fabtotum/Bed.h>
++#include <fabtotum/enums.h>
++#include <fabtotum/errors.h>
++
++namespace FABtotum {
++  extern Core core;
++  extern Head head;
++  extern Bed  bed;
++}
++
++#define FABTOTUM_EEPROM_OFFSET 70
++
++#endif /* FABTOTUM_H */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/formats/temperature.hpp Marlin-1.1.5.patched/Marlin/fabtotum/formats/temperature.hpp
+--- Marlin-1.1.5/Marlin/fabtotum/formats/temperature.hpp	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/formats/temperature.hpp	2017-09-01 23:03:32.451972928 +0200
+@@ -0,0 +1,80 @@
++  void print_heater_state(const float &c, const float &t,
++    #if ENABLED(SHOW_TEMP_ADC_VALUES)
++      const float r,
++    #endif
++    const int8_t e=-2,
++    const bool use_idx=0,
++    const bool short_format=0
++  ) {
++    SERIAL_PROTOCOLCHAR(' ');
++    SERIAL_PROTOCOLCHAR(
++      #if HAS_TEMP_BED && HAS_TEMP_HOTEND
++        e == -1 ? 'B' : 'T'
++      #elif HAS_TEMP_HOTEND
++        'T'
++      #else
++        'B'
++      #endif
++    );
++    if(use_idx && !short_format) {
++      if (e >= 0) SERIAL_PROTOCOLCHAR('0' + e);
++    }
++    SERIAL_PROTOCOLPGM(": ");
++    SERIAL_PROTOCOL(c);
++    
++    if(!short_format) {
++      SERIAL_PROTOCOLPAIR("/" , t);
++      #if ENABLED(SHOW_TEMP_ADC_VALUES)
++        SERIAL_PROTOCOLPAIR(" (", r / OVERSAMPLENR);
++        SERIAL_PROTOCOLCHAR(')');
++      #endif
++    }
++  }
++
++  void print_heaterstates(const bool short_format) {
++    #if HAS_TEMP_HOTEND
++      print_heater_state(thermalManager.degHotend(target_extruder), thermalManager.degTargetHotend(target_extruder),
++        #if ENABLED(SHOW_TEMP_ADC_VALUES)
++          thermalManager.rawHotendTemp(target_extruder),
++        #endif
++        0, // HEATER_0
++        false, // don't use index
++        short_format
++      );
++    #endif
++    #if HAS_TEMP_BED
++      print_heater_state(thermalManager.degBed(), thermalManager.degTargetBed(),
++        #if ENABLED(SHOW_TEMP_ADC_VALUES)
++          thermalManager.rawBedTemp(),
++        #endif
++        -1, // BED
++        false, // don't use index
++        short_format
++      );
++    #endif
++    if(!short_format)
++    {
++      #if HOTENDS > 0
++        HOTEND_LOOP() print_heater_state(thermalManager.degHotend(e), thermalManager.degTargetHotend(e),
++          #if ENABLED(SHOW_TEMP_ADC_VALUES)
++            thermalManager.rawHotendTemp(e),
++          #endif
++          e,
++          1 /* append index */
++        );
++      #endif
++      SERIAL_PROTOCOLPGM(" @: ");
++      SERIAL_PROTOCOL(thermalManager.getHeaterPower(target_extruder));
++      #if HAS_TEMP_BED
++        SERIAL_PROTOCOLPGM(" B@: ");
++        SERIAL_PROTOCOL(thermalManager.getHeaterPower(-1));
++      #endif
++      #if HOTENDS > 1
++        HOTEND_LOOP() {
++          SERIAL_PROTOCOLPAIR(" @", e);
++          SERIAL_PROTOCOLPGM(": ");
++          SERIAL_PROTOCOL(thermalManager.getHeaterPower(e));
++        }
++      #endif
++    }
++  }
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/Head.cpp Marlin-1.1.5.patched/Marlin/fabtotum/Head.cpp
+--- Marlin-1.1.5/Marlin/fabtotum/Head.cpp	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/Head.cpp	2017-09-01 22:23:13.293131121 +0200
+@@ -0,0 +1,57 @@
++#include <fabtotum/Head.h>
++#include <MarlinConfig.h>
++#include <fabtotum/macros.h>
++#include <serial.h>
++
++namespace FABtotum {
++
++  Head head;
++
++  unsigned int  Head::installed_head_id = 0;
++
++  Head::Head()
++  {
++    head_in_place = true;
++    head_check_type = NO_CHECK;
++  }
++
++  void Head::set24VPower(bool onoff)
++  {
++    WRITE(MILL_MOTOR_ON_PIN, onoff?HIGH:LOW);
++    analogWrite(MILL_MOTOR_ON_PIN, onoff?255:0);
++  }
++
++  void Head::setLightPower(bool onoff)
++  {
++    WRITE(HEAD_LIGHT_PIN, onoff?HIGH:LOW);
++    analogWrite(MILL_MOTOR_ON_PIN, onoff?255:0);
++  }
++
++  void Head::setLineLaserPower(bool onoff)
++  {
++    WRITE(LASER_GATE_PIN, onoff?LOW:HIGH );
++  }
++
++  void Head::setMillingMotorPower(bool onoff)
++  {
++    set24VPower(onoff);
++  }
++
++  void Head::setServo1Power(bool onoff)
++  {
++    WRITE(NOT_SERVO1_ON_PIN, onoff?LOW:HIGH);
++    analogWrite(NOT_SERVO1_ON_PIN, onoff?0:255);
++  }
++
++  void Head::setServo2Power(bool onoff)
++  {
++    WRITE(NOT_SERVO2_ON_PIN, onoff?LOW:HIGH);
++    analogWrite(NOT_SERVO2_ON_PIN, onoff?0:255);
++  }
++
++  bool Head::isInPlace()
++  {
++    return true;
++  }
++
++}
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/Head.h Marlin-1.1.5.patched/Marlin/fabtotum/Head.h
+--- Marlin-1.1.5/Marlin/fabtotum/Head.h	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/Head.h	2017-09-01 20:12:12.775780364 +0200
+@@ -0,0 +1,50 @@
++#ifndef FABTOTUM_HEAD_H
++#define FABTOTUM_HEAD_H
++
++#include <MarlinConfig.h>
++
++// Additional (software) serial interfaces
++#ifdef SMART_COMM
++  #include <SoftwareSerial.h>
++  #include <SmartComm.h>
++#endif
++
++namespace FABtotum {
++
++enum head_check_e {
++  NO_CHECK = 0,
++  THERMISTOR_CHECK = 1,
++  TWI_CHECK = 2
++};
++
++class Head {
++  public:
++    Head();
++
++    static unsigned int  installed_head_id;
++
++    // Power State
++    void set24VPower(bool onoff);
++    void setLightPower(bool onoff);
++    void setLineLaserPower(bool onoff);
++    void setMillingMotorPower(bool onoff);
++    void setServo1Power(bool onoff);
++    void setServo2Power(bool onoff);
++
++    // Check
++    bool isInPlace();
++
++  private:
++    bool          head_in_place;
++    head_check_e  head_check_type;
++    
++    #ifdef SMART_COMM
++    // Smart Heads
++    //SoftwareSerial Serial4(RXD4, TXD4);
++    //SmartComm SmartHead(Serial4);
++    #endif
++};
++
++}
++
++#endif /* FABTOTUM_HEAD_H */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/macros.h Marlin-1.1.5.patched/Marlin/fabtotum/macros.h
+--- Marlin-1.1.5/Marlin/fabtotum/macros.h	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/macros.h	2017-08-31 23:30:19.545083052 +0200
+@@ -0,0 +1,78 @@
++#ifndef FABTOTUM_MACROS_H
++#define FABTOTUM_MACROS_H
++
++//FABtotum IO definition
++#define RED_ON()	WRITE(RED_PIN,LOW)
++#define RED_OFF()	WRITE(RED_PIN,HIGH)
++#define GREEN_ON()	WRITE(GREEN_PIN,LOW)
++#define GREEN_OFF()	WRITE(GREEN_PIN,HIGH)
++#define BLUE_ON()	WRITE(BLUE_PIN,LOW)
++#define BLUE_OFF()	WRITE(BLUE_PIN,HIGH)
++
++#define MAX_PWM         127
++#define PWM_SCALE (256/(MAX_PWM+1))
++
++#define HOT_LED_ON()	WRITE(HOT_LED_PIN,HIGH)
++#define HOT_LED_OFF()	WRITE(HOT_LED_PIN,LOW)
++
++#define HEAD_LIGHT_ON()	WRITE(HEAD_LIGHT_PIN,HIGH)
++#define HEAD_LIGHT_OFF()	WRITE(HEAD_LIGHT_PIN,LOW)
++#define LASER_GATE_ON()	WRITE(LASER_GATE_PIN,LOW)
++#define LASER_GATE_OFF()	WRITE(LASER_GATE_PIN,HIGH)
++
++#define MILL_MOTOR_ON()	 WRITE(MILL_MOTOR_ON_PIN,HIGH)
++//#define MILL_MOTOR_OFF() if (IsStopped() || active_extruder!=2) WRITE(MILL_MOTOR_ON_PIN,LOW)
++#define MILL_MOTOR_OFF() WRITE(MILL_MOTOR_ON_PIN,LOW)
++
++#define HEAD_24V_ON()	   WRITE(MILL_MOTOR_ON_PIN,HIGH)
++#define HEAD_24V_OFF()	 WRITE(MILL_MOTOR_ON_PIN,LOW)
++
++#define MILL_MOTOR_STATUS()  READ(MILL_MOTOR_ON_PIN)
++
++//#define SERVO1_ON()	if (IsStopped() || active_extruder!=2) WRITE(NOT_SERVO1_ON_PIN,LOW)
++#define SERVO1_ON()	WRITE(NOT_SERVO1_ON_PIN,LOW)
++//#define SERVO1_OFF()	if (active_extruder!=2) WRITE(NOT_SERVO1_ON_PIN,HIGH)
++#define SERVO1_OFF()	WRITE(NOT_SERVO1_ON_PIN,HIGH)
++
++#define SERVO1_STATUS()   !READ(NOT_SERVO1_ON_PIN)
++
++#define SERVO2_ON()	WRITE(NOT_SERVO2_ON_PIN,LOW)
++#define SERVO2_OFF()	WRITE(NOT_SERVO2_ON_PIN,HIGH)
++#define SERVO2_STATUS()  !READ(NOT_SERVO2_ON_PIN)
++
++//FABtotum fastio definition
++// READ(IO); WRITE(IO, v);  TOGGLE(IO) ;  SET_INPUT(IO)  ; SET_OUTPUT(IO);  GET_INPUT(IO) ; GET_OUTPUT(IO) ; GET_TIMER(IO)
++#define RASPI_PWR_ON()	        WRITE(NOT_RASPI_PWR_ON_PIN,0)
++#define RASPI_PWR_OFF()	        WRITE(NOT_RASPI_PWR_ON_PIN,1)
++#define RASPI_PWR_STATUS()      !READ(NOT_RASPI_PWR_ON_PIN)
++
++#define LIGHT_SIGN_ON()	        WRITE(LIGHT_SIGN_ON_PIN,1)
++#define LIGHT_SIGN_OFF()	WRITE(LIGHT_SIGN_ON_PIN,0)
++
++#define RPI_RECOVERY_ON()	WRITE(RPI_RECOVERY_PIN,1)
++#define RPI_RECOVERY_OFF()	WRITE(RPI_RECOVERY_PIN,0)
++#define RPI_RECOVERY_STATUS()   READ(RPI_RECOVERY_PIN)
++
++#define RPI_ERROR_ACK_ON()	WRITE(RPI_RECOVERY_PIN,1)
++#define RPI_ERROR_ACK_OFF()	WRITE(RPI_RECOVERY_PIN,0)
++#define RPI_ERROR_STATUS()       READ(RPI_RECOVERY_PIN)
++#define RASPI_MAX_TURN_OFF_DELAY  3000  //30 seconds, value in tens of ms
++
++#define BEEP_ON()  TCCR0B = (TCCR0B & 0b11111000) | 0x02; analogWrite(BEEPER, 127);
++#define BEEP_OFF() TCCR0B = (TCCR0B & 0b11111000) | 0x03; analogWrite(BEEPER, 255);
++
++#define SERVO_SPINDLE_MAX  1832    //(MILL MOTOR input: 1060 us equal to Full CCW, 1460us equal to zero, 1860us equal to Full CW)
++#define SERVO_SPINDLE_MIN  1148
++#define SERVO_SPINDLE_ZERO  1488
++#define SERVO_SPINDLE_ARM  1550
++
++#define RPM_SPINDLE_MAX  14684    // spindle max rpm
++#define RPM_SPINDLE_MIN  0     // spindle min rpm
++
++#define WIRE_END_STATUS()      READ(WIRE_END_PIN)
++
++#define	SECURE_SW_STATUS()     !READ(NOT_SECURE_SW_PIN)
++#define	REEL_LENS_OPEN_STATUS()     !READ(NOT_REEL_LENS_OPEN_PIN)
++#define	DOOR_OPEN_STATUS()     READ(DOOR_OPEN_PIN)
++
++#endif /* FABTOTUM_MACROS_H */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/m_gcodes.hpp Marlin-1.1.5.patched/Marlin/fabtotum/m_gcodes.hpp
+--- Marlin-1.1.5/Marlin/fabtotum/m_gcodes.hpp	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/m_gcodes.hpp	2017-09-01 20:17:25.909744597 +0200
+@@ -0,0 +1,272 @@
++#if ENABLED(TOTUMDUINO)
++
++#include "fabtotum/FABtotum.h"
++
++/**
++ * M204: Set Accelerations in units/sec^2 (M204 P1200 R3000 T3000)
++ *
++ *    P = Printing moves
++ *    R = Retract only (no X, Y, Z) moves
++ *    T = Travel (non printing) moves
++ *
++ *  Also sets minimum segment time in ms (B20000) to prevent buffer under-runs and M20 minimum feedrate
++ */
++inline void gcode_M204() {
++  if (parser.seen('S')) {  // Kept for legacy compatibility. Should NOT BE USED for new developments.
++    planner.travel_acceleration = planner.acceleration = parser.value_linear_units();
++    //SERIAL_ECHOLNPAIR("Setting Print and Travel Acceleration: ", planner.acceleration);
++  }
++  if (parser.seen('T')) {
++    planner.retract_acceleration = parser.value_linear_units();
++    //SERIAL_ECHOLNPAIR("Setting Retract Acceleration: ", planner.retract_acceleration);
++  }
++/*
++  if (parser.seen('P')) {
++    planner.acceleration = parser.value_linear_units();
++    SERIAL_ECHOLNPAIR("Setting Print Acceleration: ", planner.acceleration);
++  }
++  if (parser.seen('R')) {
++    planner.retract_acceleration = parser.value_linear_units();
++    SERIAL_ECHOLNPAIR("Setting Retract Acceleration: ", planner.retract_acceleration);
++  }
++*/
++}
++
++/**
++ * M150: Set Status LED Color - Use R-U-B-W for R-G-B-W
++ *
++ * Always sets all 3 or 4 components. If a component is left out, set to 0.
++ *
++ * Examples:
++ *
++ *   M150 R255       ; Turn LED red
++ *   M150 R255 U127  ; Turn LED orange (PWM only)
++ *   M150            ; Turn LED off
++ *   M150 R U B      ; Turn LED white
++ *   M150 W          ; Turn LED white using a white LED
++ *
++ */
++inline void gcode_M150() {
++
++  byte red = 0;
++  byte green = 0;
++  byte blue = 0;
++
++  if (parser.seen('R')) red   = parser.intval('R');
++  if (parser.seen('U')) green = parser.intval('U');
++  if (parser.seen('B')) blue  = parser.intval('B');
++
++  if (parser.seen('S')) {
++
++    byte speed = parser.intval('S');
++    if(speed == 0) {
++      FABtotum::core.stopFading();
++      FABtotum::core.setAmbientColor(red, green, blue);
++    } else {
++      FABtotum::core.setAmbientColorFading(red, green, blue, speed);
++    }
++  } else {
++    FABtotum::core.setAmbientColor(red, green, blue);
++  }
++}
++
++  void set_led_color(const uint8_t r, const uint8_t g, const uint8_t b ) {
++    //FABtotum::core.setAmbientColor(r, g, b);
++  }
++
++/**
++ * M701 S<0-255> - Ambient Light, Set Red
++ */
++inline void gcode_M701() {
++
++  if( FABtotum::core.isAmbientFading() ) {
++    FABtotum::core.stopFading();
++  }
++
++  if (parser.seen('S'))
++  {
++    unsigned value = parser.intval('S');
++    FABtotum::core.setAmbientRed(value);
++  }
++}
++
++/**
++ * M702 S<0-255> - Ambient Light, Set Green
++ */
++inline void gcode_M702() {
++
++  if( FABtotum::core.isAmbientFading() ) {
++    FABtotum::core.stopFading();
++  }
++
++  if (parser.seen('S'))
++  {
++    unsigned value = parser.intval('S');
++    FABtotum::core.setAmbientGreen(value);
++  }
++}
++
++/**
++ * M703 S<0-255> - Ambient Light, Set Blue
++ */
++inline void gcode_M703() {
++
++  if( FABtotum::core.isAmbientFading() ) {
++    FABtotum::core.stopFading();
++  }
++
++  if (parser.seen('S'))
++  {
++    unsigned value = parser.intval('S');
++    FABtotum::core.setAmbientBlue(value);
++  }
++}
++
++/**
++ * M720 - 24VDC head power ON
++ */
++inline void gcode_M720() {
++  FABtotum::head.set24VPower(true);
++  FABtotum::head.setServo1Power(true);
++  SERIAL_ECHOLN("Power on");
++}
++
++/**
++ * M721 - 24VDC head power ON
++ */
++inline void gcode_M721() {
++  FABtotum::head.set24VPower(false);
++  FABtotum::head.setServo1Power(false);
++  SERIAL_ECHOLN("Power off");
++}
++
++/**
++ * M722 - 5VDC SERVO_1 power ON
++ */
++inline void gcode_M722() {
++  FABtotum::head.setServo1Power(true);
++}
++
++/**
++ * M723 - 5VDC SERVO_1 power OFF
++ */
++inline void gcode_M723() {
++  FABtotum::head.setServo1Power(false);
++}
++
++/**
++ * M724 - 5VDC SERVO_2 power ON
++ */
++inline void gcode_M724() {
++  FABtotum::head.setServo2Power(true);
++}
++
++/**
++ * M725 - 5VDC SERVO_2 power OFF
++ */
++inline void gcode_M725() {
++  FABtotum::head.setServo2Power(false);
++}
++
++/**
++ * M726 - 5VDC RASPBERRY PI power ON
++ */
++inline void gcode_M726() {
++  FABtotum::core.setRPiPower(true);
++}
++
++/**
++ * M727 - 5VDC RASPBERRY PI power OFF
++ */
++inline void gcode_M727() {
++  FABtotum::core.setRPiPower(false);
++}
++
++/**
++ * M740 - read WIRE_END sensor
++ */
++inline void gcode_M740() {
++  SERIAL_ECHOLN( FABtotum::core.isWireEndTriggered()?MSG_ENDSTOP_HIT:MSG_ENDSTOP_OPEN);
++}
++
++/**
++ * M741 - read DOOR_OPEN sensor
++ */
++inline void gcode_M741() {
++  SERIAL_ECHOLN( FABtotum::core.isDoorOpen()?MSG_ENDSTOP_OPEN:MSG_ENDSTOP_HIT);
++}
++
++/**
++ * M742 - read REEL_LENS_OPEN sensor
++ */
++inline void gcode_M742() {
++  SERIAL_ECHOLN( FABtotum::core.isReelLensOpen()?MSG_ENDSTOP_OPEN:MSG_ENDSTOP_HIT);
++}
++
++/**
++ * M743 - read SECURE_SWITCH sensor
++ */
++inline void gcode_M743() {
++  SERIAL_ECHOLN( FABtotum::core.isSecureSwitchTriggered()?MSG_ENDSTOP_HIT:MSG_ENDSTOP_OPEN);
++}
++
++/**
++ * M744 - read HOT_BED placed on the printing side
++ */
++inline void gcode_M744() {
++  SERIAL_ECHOLN( FABtotum::bed.isInPlace()?MSG_ENDSTOP_HIT:MSG_ENDSTOP_OPEN);
++}
++
++/**
++ * M745 - read Head placed in place
++ */
++inline void gcode_M745() {
++  SERIAL_ECHOLN( FABtotum::head.isInPlace()?MSG_ENDSTOP_HIT:MSG_ENDSTOP_OPEN);
++}
++
++/**
++ * M760 : read FABtotum Personal Fabricator Main Controller serial ID
++ */
++inline void gcode_M760() {
++  SERIAL_ECHOLN(FABtotum::core.fab_serial_code);
++}
++
++/**
++ * M761: read FABtotum Personal Fabricator Main Controller control code of serial ID
++ */
++inline void gcode_M761() {
++  SERIAL_ECHOLN(FABtotum::core.fab_control_serial_code);
++}
++
++/**
++ * M763: read/write FABtotum Personal Fabricator Main Controller production batch number
++ */
++inline void gcode_M763() {
++  if (parser.seen('S')) {
++    FABtotum::core.fab_batch_number = parser.seenval('S');
++  }
++  SERIAL_ECHOLN(FABtotum::core.fab_batch_number);
++}
++
++/**
++ * M765: read FABtotum Personal Fabricator Firmware Version
++ */
++inline void gcode_M765() {
++  SERIAL_ECHOLN(STRING_BUILD_VERSION);
++}
++
++/**
++ * M766: read FABtotum Personal Fabricator Firmware Version
++ */
++inline void gcode_M766() {
++  SERIAL_ECHOLN(STRING_BUILD_DATE);
++}
++
++/**
++ * M767: read FABtotum Personal Fabricator Firmware Version
++ */
++inline void gcode_M767() {
++  SERIAL_ECHOLN(STRING_CONFIG_H_AUTHOR);
++}
++
++#endif /* TOTUMDUINO */
+diff -Nur Marlin-1.1.5/Marlin/fabtotum/switch_m_gcodes.h Marlin-1.1.5.patched/Marlin/fabtotum/switch_m_gcodes.h
+--- Marlin-1.1.5/Marlin/fabtotum/switch_m_gcodes.h	1970-01-01 01:00:00.000000000 +0100
++++ Marlin-1.1.5.patched/Marlin/fabtotum/switch_m_gcodes.h	2017-09-01 17:52:01.725715042 +0200
+@@ -0,0 +1,91 @@
++case 701:
++  gcode_M701();
++  break;
++
++case 702:
++  gcode_M702();
++  break;
++
++case 703:
++  gcode_M703();
++  break;
++
++case 720:
++  gcode_M720();
++  break;
++
++case 721:
++  gcode_M721();
++  break;
++
++case 722:
++  gcode_M722();
++  break;
++
++case 723:
++  gcode_M723();
++  break;
++
++case 724:
++  gcode_M724();
++  break;
++
++case 725:
++  gcode_M725();
++  break;
++
++case 726:
++  gcode_M726();
++  break;
++
++case 740:
++  gcode_M740();
++  break;
++
++case 741:
++  gcode_M741();
++  break;
++
++case 742:
++  gcode_M742();
++  break;
++
++case 743:
++  gcode_M743();
++  break;
++
++case 744:
++  gcode_M744();
++  break;
++
++case 745:
++  gcode_M745();
++  break;
++
++case 727:
++  gcode_M727();
++  break;
++
++case 760:
++  gcode_M760();
++  break;
++
++case 761:
++  gcode_M761();
++  break;
++
++case 763:
++  gcode_M763();
++  break;
++
++case 765:
++  gcode_M765();
++  break;
++
++case 766:
++  gcode_M766();
++  break;
++
++case 767:
++  gcode_M767();
++  break;

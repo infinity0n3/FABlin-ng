@@ -1,0 +1,52 @@
+--- Marlin-1.1.5/Marlin/temperature.cpp	2017-08-29 01:46:39.000000000 +0200
++++ Marlin-1.1.5.patched/Marlin/temperature.cpp	2017-09-01 19:01:26.532407499 +0200
+@@ -47,6 +47,10 @@
+   #include "watchdog.h"
+ #endif
+ 
++#if ENABLED(TOTUMDUINO)
++  #include "fabtotum/FABtotum.h"
++#endif
++
+ #ifdef K1 // Defined in Configuration.h in the PID settings
+   #define K2 (1.0-K1)
+ #endif
+@@ -526,6 +530,10 @@
+ }
+ 
+ void Temperature::max_temp_error(const int8_t e) {
++  #if ENABLED(TOTUMDUINO)
++  if( FABtotum::core.triggerEvent(ERROR_MAX_TEMP, e) ) {
++  #endif
++  
+   #if HAS_TEMP_BED
+     _temp_error(e, PSTR(MSG_T_MAXTEMP), e >= 0 ? PSTR(MSG_ERR_MAXTEMP) : PSTR(MSG_ERR_MAXTEMP_BED));
+   #else
+@@ -534,8 +542,16 @@
+       UNUSED(e);
+     #endif
+   #endif
++  
++  #if ENABLED(TOTUMDUINO)
++  }
++  #endif
+ }
+ void Temperature::min_temp_error(const int8_t e) {
++  #if ENABLED(TOTUMDUINO)
++  if( FABtotum::core.triggerEvent(ERROR_MIN_TEMP, e) ) {
++  #endif
++  
+   #if HAS_TEMP_BED
+     _temp_error(e, PSTR(MSG_T_MINTEMP), e >= 0 ? PSTR(MSG_ERR_MINTEMP) : PSTR(MSG_ERR_MINTEMP_BED));
+   #else
+@@ -544,6 +560,10 @@
+       UNUSED(e);
+     #endif
+   #endif
++  
++  #if ENABLED(TOTUMDUINO)
++  }
++  #endif
+ }
+ 
+ float Temperature::get_pid_output(const int8_t e) {

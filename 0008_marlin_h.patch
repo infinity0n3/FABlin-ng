@@ -1,0 +1,14 @@
+--- Marlin-1.1.5/Marlin/Marlin.h	2017-08-29 01:46:39.000000000 +0200
++++ Marlin-1.1.5.patched/Marlin/Marlin.h	2017-09-01 05:19:24.026322807 +0200
+@@ -405,7 +405,11 @@
+ extern uint8_t active_extruder;
+ 
+ #if HAS_TEMP_HOTEND || HAS_TEMP_BED
++  #if ENABLED(TOTUMDUINO)
++  void print_heaterstates(const bool short_format = 0);
++  #else
+   void print_heaterstates();
++  #endif
+ #endif
+ 
+ #if ENABLED(MIXING_EXTRUDER)
